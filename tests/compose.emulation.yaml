@@ -1,0 +1,12 @@
+services:
+  postgres:
+    healthcheck:
+      start_period: 10m
+
+  notebook:
+    healthcheck:
+      start_period: 10m
+
+  pgadmin:
+    healthcheck:
+      start_period: 10m

@@ -1,0 +1,34 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: pip
+    directory: /pynb_image
+    schedule:
+      interval: monthly
+    groups:
+      python-course-environment:
+        patterns:
+          - "*"
+
+  - package-ecosystem: docker
+    directory: /db_image
+    schedule:
+      interval: monthly
+
+  - package-ecosystem: docker
+    directory: /pynb_image
+    schedule:
+      interval: monthly
+
+  - package-ecosystem: docker
+    directory: /pgadmin_image
+    schedule:
+      interval: monthly

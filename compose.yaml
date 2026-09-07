@@ -1,0 +1,109 @@
+name: stat315
+
+services:
+  postgres:
+    image: ${STAT315_DB_IMAGE:-ghcr.io/tamu-stat315/course-db-seed:2026-fall.1}
+    environment:
+      POSTGRES_DB: sqlda
+      POSTGRES_USER: stat315_admin
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C.UTF-8 --data-checksums --auth-local=trust --auth-host=scram-sha-256
+      STAT315_STUDENT_PASSWORD: ${STAT315_STUDENT_PASSWORD:-stat315_local_only}
+    shm_size: 128mb
+    volumes:
+      - stat315_pg18_seed1:/var/lib/postgresql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -h 127.0.0.1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" && psql -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -tAc "SELECT 1 FROM course_meta.environment_release WHERE dataset_version = '2026-fall-pg18-seed1'" | grep -qx 1
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5m
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+
+  notebook:
+    image: ${STAT315_NOTEBOOK_IMAGE:-ghcr.io/tamu-stat315/course-notebook:2026-fall.1}
+    init: true
+    environment:
+      HOME: /home/stat315
+      STAT315_DB_HOST: postgres
+      STAT315_DB_PORT: "5432"
+      STAT315_DB_NAME: sqlda
+      STAT315_DB_USER: stat315_student
+      STAT315_DB_PASSWORD: ${STAT315_STUDENT_PASSWORD:-stat315_local_only}
+      STAT315_DATASET_VERSION: 2026-fall-pg18-seed1
+      STAT315_JUPYTER_TOKEN: ${STAT315_JUPYTER_TOKEN:-stat315}
+    command:
+      - jupyter
+      - lab
+      - --no-browser
+      - --ip=0.0.0.0
+      - --port=8888
+      - --ServerApp.root_dir=/home/stat315/workspace
+      - --IdentityProvider.token=${STAT315_JUPYTER_TOKEN:-stat315}
+    volumes:
+      - ./jupyter_notebooks:/home/stat315/workspace/course_examples:ro
+      - ./student_notebooks:/home/stat315/workspace/student_notebooks
+    ports:
+      - 127.0.0.1:${JUPYTER_PORT:-8888}:8888
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - grep -Eq '^[[:space:]]*[0-9]+:[[:space:]]+[[:xdigit:]]+:22B8[[:space:]]+[[:xdigit:]]+:[[:xdigit:]]+[[:space:]]+0A[[:space:]]' /proc/net/tcp /proc/net/tcp6
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  pgadmin:
+    image: ${STAT315_PGADMIN_IMAGE:-ghcr.io/tamu-stat315/pgadmin4-mirror:2026-fall.1}
+    environment:
+      PGADMIN_DEFAULT_EMAIL: student@tamu.edu
+      PGADMIN_DEFAULT_PASSWORD: stat315_pgadmin_desktop
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      PGADMIN_DISABLE_POSTFIX: "1"
+      PGADMIN_LISTEN_PORT: "8080"
+      PGADMIN_REPLACE_SERVERS_ON_STARTUP: "False"
+      STAT315_STUDENT_PASSWORD: ${STAT315_STUDENT_PASSWORD:-stat315_local_only}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        /venv/bin/python3 -c 'import os; password = os.environ["STAT315_STUDENT_PASSWORD"].replace("\\", "\\\\").replace(":", "\\:"); open("/tmp/pgpassfile", "w", encoding="utf-8").write(f"postgres:5432:*:stat315_student:{password}\n")'
+        chmod 600 /tmp/pgpassfile
+        exec /entrypoint.sh
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./pgadmin_image/servers.json:/pgadmin4/servers.json:ro
+      - ./sql_scripts:/home/sql_scripts:ro
+    ports:
+      - 127.0.0.1:${PGADMIN_PORT:-5050}:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget --quiet --spider --timeout=3 --tries=1 http://127.0.0.1:8080/misc/ping
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  stat315_pg18_seed1:
+  pgadmin_data:

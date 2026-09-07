@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: stat315/course-db-seed:dev
+    build:
+      context: ./db_image
+
+  notebook:
+    image: stat315/course-notebook:dev
+    build:
+      context: ./pynb_image
+
+  pgadmin:
+    image: stat315/pgadmin4-mirror:dev
+    build:
+      context: ./pgadmin_image

@@ -1,0 +1,6 @@
+*
+!Dockerfile
+!datadump.sql.gz
+!init/
+!init/**
+!stat315-postgres-entrypoint.sh

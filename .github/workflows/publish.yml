@@ -1,0 +1,338 @@
+name: Publish course images
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Immutable course release tag, for example 2026-fall.1
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-course-images
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  NAMESPACE: tamu-stat315
+  BUILDX_VERSION: v0.37.0
+  BUILDKIT_IMAGE: moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+
+jobs:
+  validate:
+    name: Validate release request
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Validate branch, version, and Compose defaults
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Releases must be dispatched from main, not $GITHUB_REF" >&2
+            exit 1
+          fi
+
+          if [[ ! "$RELEASE_VERSION" =~ ^20[0-9]{2}-(spring|summer|fall)\.[1-9][0-9]*$ ]]; then
+            echo "Version must look like 2026-fall.1" >&2
+            exit 1
+          fi
+
+          for package in course-db-seed course-notebook pgadmin4-mirror; do
+            if ! grep -Fq "ghcr.io/tamu-stat315/${package}:${RELEASE_VERSION}" compose.yaml; then
+              echo "compose.yaml does not select ${package}:${RELEASE_VERSION}" >&2
+              exit 1
+            fi
+          done
+
+  native-test:
+    name: Release test (${{ matrix.platform }})
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux/amd64
+            runner_arch: X64
+            machine: x86_64
+            slug: amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            runner_arch: ARM64
+            machine: aarch64
+            slug: arm64
+
+    env:
+      DOCKER_DEFAULT_PLATFORM: ${{ matrix.platform }}
+      EXPECTED_MACHINE: ${{ matrix.machine }}
+      EXPECTED_RUNNER_ARCH: ${{ matrix.runner_arch }}
+      STAT315_E2E_RUN_ID: release-${{ matrix.slug }}-${{ github.run_id }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Verify native runner
+        run: |
+          set -Eeuo pipefail
+          [[ "$RUNNER_ARCH" == "$EXPECTED_RUNNER_ARCH" ]]
+          [[ "$(uname -m)" == "$EXPECTED_MACHINE" ]]
+
+      - name: Run complete student workflow
+        run: bash tests/run_integration.sh
+
+  publish-candidate:
+    name: Build ${{ matrix.package }}
+    needs:
+      - validate
+      - native-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: course-db-seed
+            image: ghcr.io/tamu-stat315/course-db-seed
+            context: ./db_image
+          - package: course-notebook
+            image: ghcr.io/tamu-stat315/course-notebook
+            context: ./pynb_image
+          - package: pgadmin4-mirror
+            image: ghcr.io/tamu-stat315/pgadmin4-mirror
+            context: ./pgadmin_image
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.0.0
+        with:
+          image: docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.0.0
+        with:
+          version: ${{ env.BUILDX_VERSION }}
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.0.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.0.0
+        with:
+          images: ${{ matrix.image }}
+          tags: type=raw,value=${{ inputs.version }}
+
+      - name: Build and push candidate
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.0.0
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64,linux/arm64
+          pull: true
+          push: true
+          tags: ${{ matrix.image }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.package }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.package }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Record GitHub provenance attestation
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.0.0
+        with:
+          subject-name: ${{ matrix.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  promote:
+    name: Promote tested release
+    needs: publish-candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+      attestations: read
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.0.0
+        with:
+          version: ${{ env.BUILDX_VERSION }}
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.0.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate every candidate, then promote all images
+        run: |
+          set -Eeuo pipefail
+
+          declare -A source_digests
+
+          for package in course-db-seed course-notebook pgadmin4-mirror; do
+            image="${REGISTRY}/${NAMESPACE}/${package}"
+            candidate="${image}:candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            manifest_json="$(
+              docker buildx imagetools inspect "$candidate" \
+                --format '{{json .Manifest}}'
+            )"
+
+            jq --exit-status '
+              ([.manifests[]?.platform
+                | select(.os == "linux")
+                | select(.architecture == "amd64" or .architecture == "arm64")
+                | .architecture]
+               | sort
+               | unique) == ["amd64", "arm64"]
+            ' <<<"$manifest_json" >/dev/null
+
+            source_digests["$package"]="$(
+              jq --exit-status --raw-output \
+                '.digest | select(test("^sha256:[0-9a-f]{64}$"))' \
+                <<<"$manifest_json"
+            )"
+          done
+
+          promote_tag() {
+            local source_ref=$1
+            local source_digest=$2
+            local target_ref=$3
+            local existing_json
+            local existing_digest
+
+            if existing_json="$(
+              docker buildx imagetools inspect "$target_ref" \
+                --format '{{json .Manifest}}' 2>/dev/null
+            )"; then
+              existing_digest="$(jq --raw-output '.digest' <<<"$existing_json")"
+              if [[ "$existing_digest" != "$source_digest" ]]; then
+                echo "Refusing to overwrite immutable $target_ref" >&2
+                exit 1
+              fi
+              echo "$target_ref already points to $source_digest"
+            else
+              docker buildx imagetools create \
+                --tag "$target_ref" \
+                "${source_ref}@${source_digest}"
+            fi
+          }
+
+          # Refuse every conflicting immutable target before writing any of
+          # them, so a typo or reused version cannot create a partial release.
+          for package in course-db-seed course-notebook pgadmin4-mirror; do
+            image="${REGISTRY}/${NAMESPACE}/${package}"
+            source_digest="${source_digests[$package]}"
+            for target_ref in \
+              "${image}:${RELEASE_VERSION}" \
+              "${image}:sha-${GITHUB_SHA}"; do
+              if existing_json="$(
+                docker buildx imagetools inspect "$target_ref" \
+                  --format '{{json .Manifest}}' 2>/dev/null
+              )"; then
+                existing_digest="$(
+                  jq --raw-output '.digest' <<<"$existing_json"
+                )"
+                if [[ "$existing_digest" != "$source_digest" ]]; then
+                  echo "Refusing to overwrite immutable $target_ref" >&2
+                  exit 1
+                fi
+              fi
+            done
+          done
+
+          for package in course-db-seed course-notebook pgadmin4-mirror; do
+            image="${REGISTRY}/${NAMESPACE}/${package}"
+            source_digest="${source_digests[$package]}"
+            promote_tag "$image" "$source_digest" "${image}:${RELEASE_VERSION}"
+            promote_tag "$image" "$source_digest" "${image}:sha-${GITHUB_SHA}"
+
+            promoted_json="$(
+              docker buildx imagetools inspect "${image}:${RELEASE_VERSION}" \
+                --format '{{json .Manifest}}'
+            )"
+            promoted_digest="$(jq --raw-output '.digest' <<<"$promoted_json")"
+            [[ "$promoted_digest" == "$source_digest" ]]
+
+            gh attestation verify \
+              "oci://${image}:${RELEASE_VERSION}" \
+              --repo "$GITHUB_REPOSITORY"
+          done
+
+  anonymous-pull:
+    name: Verify anonymous student access
+    needs: promote
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Set up Docker Buildx without registry credentials
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.0.0
+        with:
+          version: ${{ env.BUILDX_VERSION }}
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
+
+      - name: Verify public dual-platform manifests
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -Eeuo pipefail
+
+          for package in course-db-seed course-notebook pgadmin4-mirror; do
+            image="${REGISTRY}/${NAMESPACE}/${package}:${RELEASE_VERSION}"
+            manifest_json="$(
+              docker buildx imagetools inspect "$image" \
+                --format '{{json .Manifest}}'
+            )"
+
+            jq --exit-status '
+              ([.manifests[]?.platform
+                | select(.os == "linux")
+                | select(.architecture == "amd64" or .architecture == "arm64")
+                | .architecture]
+               | sort
+               | unique) == ["amd64", "arm64"]
+            ' <<<"$manifest_json" >/dev/null
+          done
