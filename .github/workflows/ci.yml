@@ -1,0 +1,58 @@
+name: Container CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    name: Integration (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux/amd64
+            runner_arch: X64
+            machine: x86_64
+            slug: amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            runner_arch: ARM64
+            machine: aarch64
+            slug: arm64
+
+    env:
+      DOCKER_DEFAULT_PLATFORM: ${{ matrix.platform }}
+      EXPECTED_MACHINE: ${{ matrix.machine }}
+      EXPECTED_RUNNER_ARCH: ${{ matrix.runner_arch }}
+      STAT315_E2E_RUN_ID: ${{ matrix.slug }}-${{ github.run_id }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Verify native runner and container tooling
+        run: |
+          set -Eeuo pipefail
+          [[ "$RUNNER_ARCH" == "$EXPECTED_RUNNER_ARCH" ]]
+          [[ "$(uname -m)" == "$EXPECTED_MACHINE" ]]
+          docker version
+          docker compose version
+
+      - name: Run complete student workflow
+        run: bash tests/run_integration.sh

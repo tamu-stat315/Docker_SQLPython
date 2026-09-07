@@ -1,27 +1,40 @@
-FROM python:3.13.7-slim
-LABEL maintainer="Scott A. Bruce <sabruce@tamu.edu>"
-LABEL version="1.4"
-LABEL description="Python Jupyter notebook development environment"
+# syntax=docker/dockerfile:1.7
+FROM python:3.14.7-slim-trixie@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
 
-RUN apt-get update -y
-RUN apt-get install -y gcc
-RUN apt-get install -y build-essential libpq-dev
-RUN apt-get install -y graphviz
+COPY --from=ghcr.io/astral-sh/uv:0.12.10@sha256:2bb3ebca0a796a155094a27773d290c4b074572e6107f171d88d086682fd2500 /uv /uvx /bin/
 
-RUN pip install --upgrade pip
- 
-RUN pip install numpy==2.2.6  
-RUN pip install pandas==2.3.2 
-RUN pip install seaborn==0.13.2 
-RUN pip install jupyter==1.1.1 
-RUN pip install scikit-learn==1.7.2 
-RUN pip install SQLAlchemy==2.0.43 
-RUN pip install psycopg2==2.9.10 
-RUN pip install statsmodels==0.14.5 
-RUN pip install dask[complete]==2025.9.0 
-RUN pip install graphviz==0.21
-RUN pip install dask-ml==2025.1.0
+LABEL org.opencontainers.image.source="https://github.com/tamu-stat315/Docker_SQLPython"
+LABEL org.opencontainers.image.description="Python 3.14 and Jupyter environment for STAT 315"
+LABEL org.opencontainers.image.licenses="MIT"
 
-WORKDIR /home/notebooks/
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never \
+    PATH="/opt/stat315/.venv/bin:$PATH" \
+    PYTHONPATH="/opt/stat315"
 
-CMD jupyter notebook --no-browser --allow-root --ip 0.0.0.0
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates graphviz \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid 1000 stat315 \
+    && useradd --uid 1000 --gid stat315 --create-home stat315 \
+    && mkdir -p /home/stat315/workspace/course_examples \
+       /home/stat315/workspace/student_notebooks \
+    && chown -R stat315:stat315 /home/stat315
+
+WORKDIR /opt/stat315
+COPY pyproject.toml uv.lock .python-version ./
+RUN uv sync --locked --no-install-project --no-dev \
+    && uv cache clean
+
+COPY --chown=stat315:stat315 stat315_db.py verify_environment.py ./
+
+USER stat315
+WORKDIR /home/stat315/workspace/student_notebooks
+
+EXPOSE 8888
+
+CMD ["jupyter", "lab", "--no-browser", "--ip=0.0.0.0", "--port=8888", "--ServerApp.root_dir=/home/stat315/workspace", "--IdentityProvider.token=stat315"]

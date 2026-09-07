@@ -1,0 +1,7 @@
+*
+!Dockerfile
+!.python-version
+!pyproject.toml
+!uv.lock
+!stat315_db.py
+!verify_environment.py
