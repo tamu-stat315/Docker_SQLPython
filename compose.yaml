@@ -18,7 +18,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
-      start_period: 30s
+      start_period: 5m
     stop_grace_period: 30s
     security_opt:
       - no-new-privileges:true
@@ -53,14 +53,12 @@ services:
         condition: service_healthy
     healthcheck:
       test:
-        - CMD
-        - python
-        - -c
-        - import socket; socket.create_connection(('127.0.0.1', 8888), 3).close()
+        - CMD-SHELL
+        - grep -Eq '^[[:space:]]*[0-9]+:[[:space:]]+[[:xdigit:]]+:22B8[[:space:]]+[[:xdigit:]]+:[[:xdigit:]]+[[:space:]]+0A[[:space:]]' /proc/net/tcp /proc/net/tcp6
       interval: 5s
       timeout: 5s
       retries: 20
-      start_period: 20s
+      start_period: 30s
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -95,10 +93,8 @@ services:
         condition: service_healthy
     healthcheck:
       test:
-        - CMD
-        - /venv/bin/python3
-        - -c
-        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/misc/ping', timeout=3)
+        - CMD-SHELL
+        - wget --quiet --spider --timeout=3 --tries=1 http://127.0.0.1:8080/misc/ping
       interval: 5s
       timeout: 5s
       retries: 20

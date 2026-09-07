@@ -2,14 +2,25 @@
 set -Eeuo pipefail
 
 readonly PROJECT_NAME="stat315-e2e-${STAT315_E2E_RUN_ID:-${GITHUB_RUN_ID:-$$}}"
-default_machine=$(uname -m)
-case "$default_machine" in
-  arm64) default_machine=aarch64 ;;
-  amd64) default_machine=x86_64 ;;
-esac
-readonly EXPECTED_MACHINE="${EXPECTED_MACHINE:-$default_machine}"
+
+normalize_machine() {
+  case "$1" in
+    arm64 | aarch64 | linux/arm64 | linux/arm64/*) printf 'aarch64\n' ;;
+    amd64 | x86_64 | linux/amd64 | linux/amd64/*) printf 'x86_64\n' ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+default_machine=$(normalize_machine "$(uname -m)")
+expected_machine=$(normalize_machine \
+  "${EXPECTED_MACHINE:-${DOCKER_DEFAULT_PLATFORM:-$default_machine}}")
+readonly EXPECTED_MACHINE="$expected_machine"
 readonly NOTEBOOK_SENTINEL="student_notebooks/.stat315-e2e-persistence"
 original_notebook_mode=""
+startup_wait_timeout=600
+restart_wait_timeout=300
+kernel_startup_timeout=60
+notebook_cell_timeout=180
 
 export JUPYTER_PORT="${JUPYTER_PORT:-18888}"
 export PGADMIN_PORT="${PGADMIN_PORT:-15050}"
@@ -22,6 +33,21 @@ compose=(
   --file compose.yaml
   --file compose.dev.yaml
 )
+
+# Cross-architecture execution through QEMU is dramatically slower than either
+# native student platform. Keep production health budgets strict while allowing
+# this same suite to validate an emulated image to completion.
+if [[ "$EXPECTED_MACHINE" != "$default_machine" ]]; then
+  compose+=(--file tests/compose.emulation.yaml)
+  startup_wait_timeout=1800
+  restart_wait_timeout=1200
+  kernel_startup_timeout=600
+  notebook_cell_timeout=900
+fi
+readonly STARTUP_WAIT_TIMEOUT="$startup_wait_timeout"
+readonly RESTART_WAIT_TIMEOUT="$restart_wait_timeout"
+readonly KERNEL_STARTUP_TIMEOUT="$kernel_startup_timeout"
+readonly NOTEBOOK_CELL_TIMEOUT="$notebook_cell_timeout"
 
 cleanup() {
   local exit_code=$?
@@ -81,7 +107,7 @@ if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
 fi
 
 printf 'Starting the complete student stack...\n'
-"${compose[@]}" up --detach --wait --wait-timeout 600
+"${compose[@]}" up --detach --wait --wait-timeout "$STARTUP_WAIT_TIMEOUT"
 
 printf 'Checking native container architectures...\n'
 for service in postgres notebook pgadmin; do
@@ -183,7 +209,8 @@ printf 'Executing the sample notebook from beginning to end...\n'
   --execute /home/stat315/workspace/course_examples/jupyternotebook.ipynb \
   --output stat315-executed.ipynb \
   --output-dir /tmp \
-  --ExecutePreprocessor.timeout=180
+  --ExecutePreprocessor.startup_timeout="$KERNEL_STARTUP_TIMEOUT" \
+  --ExecutePreprocessor.timeout="$NOTEBOOK_CELL_TIMEOUT"
 
 printf 'Checking the student-facing web services...\n'
 curl --fail --silent --show-error \
@@ -252,14 +279,14 @@ if "${compose[@]}" exec -T pgadmin \
 fi
 
 "${compose[@]}" restart
-"${compose[@]}" up --detach --wait --wait-timeout 300
+"${compose[@]}" up --detach --wait --wait-timeout "$RESTART_WAIT_TIMEOUT"
 student_psql --tuples-only --no-align \
   --command='SELECT value FROM student_work._persistence_check' \
   | grep -qx '315'
 grep -qx 'persistent' "$NOTEBOOK_SENTINEL"
 
 "${compose[@]}" down
-"${compose[@]}" up --detach --wait --wait-timeout 300
+"${compose[@]}" up --detach --wait --wait-timeout "$RESTART_WAIT_TIMEOUT"
 student_psql --tuples-only --no-align \
   --command='SELECT value FROM student_work._persistence_check' \
   | grep -qx '315'
@@ -267,7 +294,7 @@ grep -qx 'persistent' "$NOTEBOOK_SENTINEL"
 
 printf 'Checking an explicit database reset while preserving notebooks...\n'
 "${compose[@]}" down --volumes
-"${compose[@]}" up --detach --wait --wait-timeout 600
+"${compose[@]}" up --detach --wait --wait-timeout "$STARTUP_WAIT_TIMEOUT"
 
 reset_relation=$(student_psql --tuples-only --no-align \
   --command="SELECT to_regclass('student_work._persistence_check') IS NULL" \

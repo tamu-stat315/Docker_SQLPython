@@ -7,14 +7,6 @@ LABEL org.opencontainers.image.source="https://github.com/tamu-stat315/Docker_SQ
 LABEL org.opencontainers.image.description="Python 3.14 and Jupyter environment for STAT 315"
 LABEL org.opencontainers.image.licenses="MIT"
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy \
-    UV_PYTHON_DOWNLOADS=never \
-    PATH="/opt/stat315/.venv/bin:$PATH" \
-    PYTHONPATH="/opt/stat315"
-
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates graphviz \
     && rm -rf /var/lib/apt/lists/*
@@ -24,6 +16,15 @@ RUN groupadd --gid 1000 stat315 \
     && mkdir -p /home/stat315/workspace/course_examples \
        /home/stat315/workspace/student_notebooks \
     && chown -R stat315:stat315 /home/stat315
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_COMPILE_BYTECODE_TIMEOUT=600 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never \
+    PATH="/opt/stat315/.venv/bin:$PATH" \
+    PYTHONPATH="/opt/stat315"
 
 WORKDIR /opt/stat315
 COPY pyproject.toml uv.lock .python-version ./

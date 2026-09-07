@@ -22,8 +22,11 @@ docker compose pull
 docker compose up --detach --wait
 ```
 
-The first download is the slowest. A new database volume is then initialized
-and checked automatically before JupyterLab or pgAdmin starts.
+The first clean start, including the first start after a reset, can take several
+minutes. Docker downloads the images, then PostgreSQL restores and validates
+the course dataset. The command intentionally waits until all three services
+are healthy, so leave the terminal open. Later starts reuse the initialized
+database volume and are much faster.
 
 Open the tools in a browser:
 
