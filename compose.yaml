@@ -2,7 +2,7 @@ name: stat315
 
 services:
   postgres:
-    image: ${STAT315_DB_IMAGE:-ghcr.io/tamu-stat315/course-db-seed:2026-fall.1}
+    image: ${STAT315_DB_IMAGE:-ghcr.io/tamu-stat315/course-db-seed:2026-fall.1@sha256:f7228eff7ee9dcbfc4b71b0e3b396b4f61f0e80cd58e3eeb0123e13def42e0fc}
     environment:
       POSTGRES_DB: sqlda
       POSTGRES_USER: stat315_admin
@@ -24,7 +24,7 @@ services:
       - no-new-privileges:true
 
   notebook:
-    image: ${STAT315_NOTEBOOK_IMAGE:-ghcr.io/tamu-stat315/course-notebook:2026-fall.1}
+    image: ${STAT315_NOTEBOOK_IMAGE:-ghcr.io/tamu-stat315/course-notebook:2026-fall.1@sha256:da26f3f33226a4616b057f5066c7482945bb06ff09a7a7adef3c9363480efa24}
     init: true
     environment:
       HOME: /home/stat315
@@ -65,7 +65,7 @@ services:
       - ALL
 
   pgadmin:
-    image: ${STAT315_PGADMIN_IMAGE:-ghcr.io/tamu-stat315/pgadmin4-mirror:2026-fall.1}
+    image: ${STAT315_PGADMIN_IMAGE:-ghcr.io/tamu-stat315/pgadmin4-mirror:2026-fall.1@sha256:3bd6ce88b14f7c570360680ae98de81fb43c98f52f5604bbb4ce109eff096417}
     environment:
       PGADMIN_DEFAULT_EMAIL: student@tamu.edu
       PGADMIN_DEFAULT_PASSWORD: stat315_pgadmin_desktop
