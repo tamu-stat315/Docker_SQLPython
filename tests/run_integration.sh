@@ -16,6 +16,7 @@ expected_machine=$(normalize_machine \
   "${EXPECTED_MACHINE:-${DOCKER_DEFAULT_PLATFORM:-$default_machine}}")
 readonly EXPECTED_MACHINE="$expected_machine"
 readonly NOTEBOOK_SENTINEL="student_notebooks/.stat315-e2e-persistence"
+readonly SQL_SENTINEL="student_sql/.stat315-e2e-persistence.sql"
 original_notebook_mode=""
 startup_wait_timeout=600
 restart_wait_timeout=300
@@ -26,6 +27,7 @@ export JUPYTER_PORT="${JUPYTER_PORT:-18888}"
 export PGADMIN_PORT="${PGADMIN_PORT:-15050}"
 export STAT315_STUDENT_PASSWORD="${STAT315_STUDENT_PASSWORD:-e2e:student\\password}"
 export STAT315_JUPYTER_TOKEN="${STAT315_JUPYTER_TOKEN:-e2e-token}"
+export STAT315_HOST_UID="${STAT315_HOST_UID:-$(id -u)}"
 
 compose=(
   docker compose
@@ -60,6 +62,7 @@ cleanup() {
 
   "${compose[@]}" down --volumes --remove-orphans || true
   rm -f "$NOTEBOOK_SENTINEL"
+  rm -f "$SQL_SENTINEL"
   if [[ -n "$original_notebook_mode" ]]; then
     chmod "$original_notebook_mode" student_notebooks
   fi
@@ -114,6 +117,10 @@ for service in postgres notebook pgadmin; do
   actual_machine=$("${compose[@]}" exec -T "$service" uname -m | tr -d '\r')
   assert_equal "$actual_machine" "$EXPECTED_MACHINE" "$service architecture"
 done
+
+pgadmin_process_uid=$("${compose[@]}" exec -T pgadmin \
+  sh -c "awk '/^Uid:/{print \$2}' /proc/1/status" | tr -d '\r')
+assert_equal "$pgadmin_process_uid" "$STAT315_HOST_UID" "pgAdmin process uid"
 
 printf 'Checking network exposure and non-root processes...\n'
 postgres_container=$("${compose[@]}" ps --quiet postgres)
@@ -278,12 +285,18 @@ if "${compose[@]}" exec -T pgadmin \
   exit 1
 fi
 
+"${compose[@]}" exec -T pgadmin \
+  sh -c 'printf "%s\n" "SELECT 315 AS persistence_check;" > /home/student_sql/.stat315-e2e-persistence.sql'
+grep -qx 'SELECT 315 AS persistence_check;' "$SQL_SENTINEL"
+git check-ignore --quiet "$SQL_SENTINEL"
+
 "${compose[@]}" restart
 "${compose[@]}" up --detach --wait --wait-timeout "$RESTART_WAIT_TIMEOUT"
 student_psql --tuples-only --no-align \
   --command='SELECT value FROM student_work._persistence_check' \
   | grep -qx '315'
 grep -qx 'persistent' "$NOTEBOOK_SENTINEL"
+grep -qx 'SELECT 315 AS persistence_check;' "$SQL_SENTINEL"
 
 "${compose[@]}" down
 "${compose[@]}" up --detach --wait --wait-timeout "$RESTART_WAIT_TIMEOUT"
@@ -291,6 +304,7 @@ student_psql --tuples-only --no-align \
   --command='SELECT value FROM student_work._persistence_check' \
   | grep -qx '315'
 grep -qx 'persistent' "$NOTEBOOK_SENTINEL"
+grep -qx 'SELECT 315 AS persistence_check;' "$SQL_SENTINEL"
 
 printf 'Checking an explicit database reset while preserving notebooks...\n'
 "${compose[@]}" down --volumes
@@ -305,5 +319,6 @@ student_psql --tuples-only --no-align \
   --command='SELECT count(*) FROM public.customers' \
   | grep -qx '50000'
 grep -qx 'persistent' "$NOTEBOOK_SENTINEL"
+grep -qx 'SELECT 315 AS persistence_check;' "$SQL_SENTINEL"
 
 printf 'All STAT 315 integration checks passed on %s.\n' "$EXPECTED_MACHINE"

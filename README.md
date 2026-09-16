@@ -17,6 +17,14 @@ Container Registry (GHCR); a Docker Hub account is not required.
 Install and start [Docker Desktop](https://www.docker.com/products/docker-desktop/),
 then download this repository and open a terminal in its folder.
 
+On macOS and Windows, continue with the commands below. On native Linux, first
+run `id -u`. If it prints a value other than `1000`, copy
+[`.env.example`](.env.example) to `.env` and set `STAT315_HOST_UID` to the
+number it printed. This lets pgAdmin save files as the account that owns the
+course folder, without `sudo`, `chown`, or broad permission changes. The course
+supports Docker Desktop and standard (rootful) Docker Engine; rootless Docker
+Engine uses a different ownership model and is not supported by this setup.
+
 ```bash
 docker compose pull
 docker compose up --detach --wait
@@ -61,9 +69,10 @@ even when containers are stopped, replaced, or the course repository is
 updated. Students should create their own SQL objects explicitly in the
 writable `student_work` schema; they persist in a Docker volume.
 
-In pgAdmin, course SQL examples are read-only under `/home/sql_scripts`. Save an
-important query to the host (or paste it into a file under `student_notebooks`)
-before performing a database reset, which intentionally removes pgAdmin state.
+In pgAdmin, course SQL examples are read-only under `/home/sql_scripts`. Save
+your own SQL scripts under `/home/student_sql`. That path is the host folder
+`student_sql`, so files saved there remain on the computer when containers are
+stopped, replaced, or reset. Student SQL files are ignored by Git.
 
 Stop the environment without deleting work:
 
@@ -89,7 +98,7 @@ from accidentally reusing an incompatible data directory.
 ## Resetting the database
 
 This removes the local database and pgAdmin state, then recreates both from the
-course images. Files in `student_notebooks` are not removed.
+course images. Files in `student_notebooks` and `student_sql` are not removed.
 
 ```bash
 docker compose down --volumes
@@ -114,6 +123,18 @@ installed, make sure it is running before issuing Compose commands. An
 `unauthorized`, `manifest unknown`, or `no matching manifest` pull error is a
 course-release problem; students should not force an Intel image or substitute
 an old Docker Hub image.
+
+If pgAdmin was first started on native Linux with the wrong `STAT315_HOST_UID`,
+set the correct value in `.env`, then reset only its local settings:
+
+```bash
+docker compose down
+docker volume rm stat315_pgadmin_data_v2
+docker compose up --detach --wait
+```
+
+This keeps the PostgreSQL data volume and both host work folders. It removes
+pgAdmin-local settings and history, then restores the supplied course server.
 
 Apple Silicon students should leave Docker's platform setting at its default;
 the native ARM64 images are faster and more reliable than emulating Intel
