@@ -14,7 +14,19 @@ It verifies clean PostgreSQL initialization, exact dataset row counts,
 extensions and materialized views, Python 3.14 and all course imports,
 SQLAlchemy and Psycopg connections, sample-notebook execution, both browser
 endpoints, pgAdmin's registered connection, restricted privileges, non-root
-service processes, persistence, and explicit reset behavior.
+service processes, host-backed notebook and SQL-script persistence, and
+explicit reset behavior.
+
+The pgAdmin service runs as `${STAT315_HOST_UID:-1000}:0`. Native Linux tests
+must export `STAT315_HOST_UID=$(id -u)` and must not make `student_sql`
+world-writable; otherwise CI would mask the student-facing ownership problem.
+This supports standard (rootful) Docker Engine, not rootless Docker Engine,
+whose subordinate-ID mapping requires a separately designed and tested path.
+The fresh `pgadmin_data_v2` volume prevents older UID-5050 settings from
+blocking this configuration; it does not migrate prior pgAdmin-local settings
+or history. Changing the user model requires another pgAdmin-only volume key.
+After confirming that no old pgAdmin-local data is needed, a maintainer may
+remove the orphaned prior volume with `docker volume rm stat315_pgadmin_data`.
 
 For a local development stack outside the test harness:
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Add a writable, Git-ignored `student_sql` host folder that appears as
+  `/home/student_sql` in pgAdmin while keeping course examples under
+  `/home/sql_scripts` read-only.
+- Run pgAdmin as the configurable non-root host user ID and start it with the
+  fresh `pgadmin_data_v2` settings volume, so native-Linux students can save
+  host-owned scripts without changing broad folder permissions. Existing
+  PostgreSQL data is not affected. Prior pgAdmin-local settings and history are
+  not migrated; pgAdmin recreates the supplied course server registration.
+- Extend integration coverage to verify that a SQL script written through the
+  pgAdmin container remains after restart, ordinary shutdown, and volume reset.
+
 ## 2026-fall.1
 
 - Move student image distribution from personal Docker Hub repositories to the

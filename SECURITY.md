@@ -11,6 +11,8 @@ The default configuration reduces the impact of common mistakes:
 - JupyterLab and pgAdmin are published only on the loopback interface.
 - PostgreSQL has no host port at all.
 - The notebook and service processes run as non-root users.
+- pgAdmin uses the configurable non-root `STAT315_HOST_UID` so SQL scripts it
+  saves in `student_sql` belong to the local student account on native Linux.
 - `no-new-privileges` is enabled for every service.
 - PostgreSQL generates its administrator password locally and does not share it
   with the notebook or pgAdmin containers.
@@ -27,7 +29,9 @@ control layer, and review PostgreSQL and Jupyter security separately.
 
 Code run in a notebook can read starter files in `jupyter_notebooks`, can change
 files in `student_notebooks`, and can create or modify objects in the
-`student_work` database schema. Only run notebooks from sources you trust.
+`student_work` database schema. Among the repository folders mounted into
+pgAdmin, `sql_scripts` is read-only and the host-backed `student_sql` workspace
+is writable. Only run notebooks and SQL scripts from sources you trust.
 
 ## Reporting a vulnerability
 
