@@ -89,6 +89,43 @@ student_psql() {
     --set=ON_ERROR_STOP=1 "$@"
 }
 
+assert_pgadmin_registration() {
+  "${compose[@]}" exec -T pgadmin /venv/bin/python3 - <<'PY'
+import json
+import sqlite3
+
+import psycopg
+
+database = sqlite3.connect("/var/lib/pgadmin/pgadmin4.db")
+servers = database.execute(
+    "SELECT name, host, port, maintenance_db, username, connection_params "
+    "FROM server ORDER BY id"
+).fetchall()
+expected = (
+    "STAT 315 PostgreSQL 18",
+    "postgres",
+    5432,
+    "sqlda",
+    "stat315_student",
+)
+if len(servers) != 1 or servers[0][:5] != expected:
+    raise SystemExit(f"Unexpected pgAdmin server registrations: {servers!r}")
+connection_params = json.loads(servers[0][5])
+if connection_params.get("passfile") != "/tmp/pgpassfile":
+    raise SystemExit(f"Unexpected pgAdmin passfile: {connection_params!r}")
+
+with psycopg.connect(
+    "host=postgres port=5432 dbname=sqlda "
+    "user=stat315_student passfile=/tmp/pgpassfile"
+) as connection:
+    customer_count = connection.execute(
+        "SELECT count(*) FROM public.customers"
+    ).fetchone()[0]
+if customer_count != 50_000:
+    raise SystemExit(f"pgAdmin connection found {customer_count} customers")
+PY
+}
+
 printf 'Validating Compose configuration...\n'
 "${compose[@]}" config --quiet
 
@@ -229,41 +266,16 @@ curl --fail --silent --show-error \
   "http://127.0.0.1:${PGADMIN_PORT}/misc/ping" \
   >/dev/null
 
-"${compose[@]}" exec -T pgadmin /venv/bin/python3 - <<'PY'
-import json
-import sqlite3
+assert_pgadmin_registration
 
-import psycopg
-
-database = sqlite3.connect("/var/lib/pgadmin/pgadmin4.db")
-server = database.execute(
-    "SELECT name, host, port, maintenance_db, username, connection_params "
-    "FROM server WHERE name = ?",
-    ("STAT 315 PostgreSQL 18",),
-).fetchone()
-expected = (
-    "STAT 315 PostgreSQL 18",
-    "postgres",
-    5432,
-    "sqlda",
-    "stat315_student",
-)
-if server is None or server[:5] != expected:
-    raise SystemExit(f"Unexpected pgAdmin server registration: {server!r}")
-connection_params = json.loads(server[5])
-if connection_params.get("passfile") != "/tmp/pgpassfile":
-    raise SystemExit(f"Unexpected pgAdmin passfile: {connection_params!r}")
-
-with psycopg.connect(
-    "host=postgres port=5432 dbname=sqlda "
-    "user=stat315_student passfile=/tmp/pgpassfile"
-) as connection:
-    customer_count = connection.execute(
-        "SELECT count(*) FROM public.customers"
-    ).fetchone()[0]
-if customer_count != 50_000:
-    raise SystemExit(f"pgAdmin connection found {customer_count} customers")
-PY
+printf 'Checking repair of an initialized pgAdmin profile with no servers...\n'
+"${compose[@]}" stop pgadmin
+"${compose[@]}" run --rm --no-deps \
+  --entrypoint /venv/bin/python3 \
+  pgadmin \
+  -c 'import sqlite3; database = sqlite3.connect("/var/lib/pgadmin/pgadmin4.db"); database.execute("DELETE FROM server"); database.commit()'
+"${compose[@]}" up --detach --wait --wait-timeout "$RESTART_WAIT_TIMEOUT"
+assert_pgadmin_registration
 
 printf 'Checking persistence across restart and ordinary shutdown...\n'
 student_psql --command='CREATE TABLE student_work._persistence_check (value integer NOT NULL)'
