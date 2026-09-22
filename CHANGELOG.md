@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Restore the prescribed pgAdmin server registration on every launch so an
+  existing but incomplete pgAdmin settings volume cannot leave the **Servers**
+  tree empty. Add a persisted-profile regression test on both native AMD64 and
+  ARM64 CI runners, and require the expected registration in the pgAdmin health
+  check.
 - Add a writable, Git-ignored `student_sql` host folder that appears as
   `/home/student_sql` in pgAdmin while keeping course examples under
   `/home/sql_scripts` read-only.

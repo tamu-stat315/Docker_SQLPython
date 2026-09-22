@@ -15,7 +15,15 @@ extensions and materialized views, Python 3.14 and all course imports,
 SQLAlchemy and Psycopg connections, sample-notebook execution, both browser
 endpoints, pgAdmin's registered connection, restricted privileges, non-root
 service processes, host-backed notebook and SQL-script persistence, and
-explicit reset behavior.
+explicit reset behavior. The suite also removes the registered course server
+from an initialized pgAdmin profile and verifies that the next launch repairs
+it without deleting the volume.
+
+The pgAdmin health check requires both a responsive web service and exactly one
+matching expected course server in its settings database. A healthy container
+therefore establishes that the connection appears in Object Explorer; the
+integration test separately establishes that the connection can query
+PostgreSQL.
 
 The pgAdmin service runs as `${STAT315_HOST_UID:-1000}:0`. Native Linux tests
 must export `STAT315_HOST_UID=$(id -u)` and must not make `student_sql`
@@ -25,6 +33,10 @@ whose subordinate-ID mapping requires a separately designed and tested path.
 The fresh `pgadmin_data_v2` volume prevents older UID-5050 settings from
 blocking this configuration; it does not migrate prior pgAdmin-local settings
 or history. Changing the user model requires another pgAdmin-only volume key.
+The repository's `servers.json` is authoritative and is reloaded with
+replacement enabled on every pgAdmin start. This deliberately discards manual
+server registrations at restart while preserving saved SQL files and
+PostgreSQL state.
 After confirming that no old pgAdmin-local data is needed, a maintainer may
 remove the orphaned prior volume with `docker volume rm stat315_pgadmin_data`.
 

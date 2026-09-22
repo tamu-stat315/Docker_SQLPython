@@ -45,6 +45,12 @@ pgAdmin opens directly in local desktop mode and already contains a server
 named **STAT 315 PostgreSQL 18**. No pgAdmin login or database-password entry is
 required with the default configuration.
 
+The course server registration is restored from the repository each time
+pgAdmin starts. This repairs an incomplete local pgAdmin profile automatically.
+Manually added pgAdmin server registrations are not retained across pgAdmin
+restarts, but saved SQL files, PostgreSQL data, and work in the `student_work`
+schema are unaffected.
+
 The sample notebook demonstrates the recommended database connection:
 
 ```python

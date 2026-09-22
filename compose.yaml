@@ -74,7 +74,7 @@ services:
       PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
       PGADMIN_DISABLE_POSTFIX: "1"
       PGADMIN_LISTEN_PORT: "8080"
-      PGADMIN_REPLACE_SERVERS_ON_STARTUP: "False"
+      PGADMIN_REPLACE_SERVERS_ON_STARTUP: "True"
       STAT315_STUDENT_PASSWORD: ${STAT315_STUDENT_PASSWORD:-stat315_local_only}
     entrypoint:
       - /bin/sh
@@ -96,7 +96,16 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - wget --quiet --spider --timeout=3 --tries=1 http://127.0.0.1:8080/misc/ping
+        - >-
+          wget --quiet --spider --timeout=3 --tries=1
+          http://127.0.0.1:8080/misc/ping &&
+          /venv/bin/python3 -c 'import sqlite3, sys;
+          rows = sqlite3.connect("/var/lib/pgadmin/pgadmin4.db").execute(
+          "SELECT name, host, port, maintenance_db, username FROM server "
+          "WHERE name = ?", ("STAT 315 PostgreSQL 18",)
+          ).fetchall();
+          sys.exit(0 if rows == [("STAT 315 PostgreSQL 18", "postgres", 5432,
+          "sqlda", "stat315_student")] else 1)'
       interval: 5s
       timeout: 5s
       retries: 20
